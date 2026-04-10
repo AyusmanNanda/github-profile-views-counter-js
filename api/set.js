@@ -20,21 +20,20 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: "Not allowed" });
     }
 
-    if (isNaN(value)) {
+    if (isNaN(value) || value < 0) {
       return res.status(400).json({ error: "Invalid value" });
     }
 
-    await kv.set(pageId, value);
+    await kv.set(`count:${pageId}`, String(value));
 
     return res.status(200).json({
       success: true,
       pageId,
-      value
+      value,
+      key: `count:${pageId}`
     });
 
   } catch (err) {
-    return res.status(500).json({
-      error: err.message
-    });
+    return res.status(500).json({ error: err.message });
   }
 }
