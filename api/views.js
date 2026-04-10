@@ -11,7 +11,7 @@ function getIp(req) {
   let ip = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || "unknown";
   if (Array.isArray(ip)) ip = ip[0];
   if (typeof ip === "string") ip = ip.split(",")[0].trim();
-  return ip.replace(/[^a-zA-Z0-9._:-]/g, "_");
+  return ip.replace(/[^a-zA-Z0-9._:-]/g, "_").slice(0, 45);
 }
 
 function getDateKeys() {
@@ -34,10 +34,15 @@ function getISOWeek(date) {
   return String(Math.ceil((((d - yearStart) / 86400000) + 1) / 7)).padStart(2, "0");
 }
 
-function formatNumber(num) {
+function formatNumber(num, locale, precision, raw) {
+  if (raw) return String(num);
+  const p = precision ?? 1;
+  if (locale) {
+    try { return new Intl.NumberFormat(locale).format(num); } catch (_) {}
+  }
   if (num < 1000) return String(num);
-  if (num < 1_000_000) return (num / 1000).toFixed(1).replace(/\.0$/, "") + "k";
-  return (num / 1_000_000).toFixed(1) .replace(/\.0$/, "") + "M";
+  if (num < 1_000_000) return (num / 1000).toFixed(p).replace(/\.0+$/, "") + "k";
+  return (num / 1_000_000).toFixed(p).replace(/\.0+$/, "") + "M";
 }
 
 function normalizeColor(color) {
@@ -117,31 +122,53 @@ function normalizeColor(color) {
   return `#${color}`;
 }
 
-function svg(label, value, labelBg, valueBg, style, logo, customWidth, customHeight, isDark) {
-  const safeLabel = String(label || "views");
-  const safeValue = String(value || "0");
+function clamp(val, min, max) {
+  return Math.min(max, Math.max(min, val));
+}
 
-  const logoWidth    = logo ? 14 : 0;
-  const logoPad      = logo ? 4  : 0;
-  const labelWidth   = Math.max(60, safeLabel.length * 6.5 + 16 + logoWidth + logoPad);
-  const valueWidth   = Math.max(40, safeValue.length * 7.5 + 16);
+function svg(label, value, labelBg, valueBg, style, logo, opts = {}) {
+  const {
+    customWidth   = null,
+    customHeight  = null,
+    isDark        = false,
+    fontSize      = 11,
+    bold          = false,
+    padding       = 16,
+    radius: customRadius = null,
+    labelOpacity  = 1,
+    prefix        = "",
+    suffix        = "",
+    compact       = false,
+  } = opts;
+
+  const safeLabel = String(label || "views");
+  const safeValue = `${prefix}${String(value || "0")}${suffix}`;
+
+  const fs        = clamp(fontSize, 8, 20);
+  const charW     = fs * 0.62;
+  const logoWidth = logo ? 14 : 0;
+  const logoPad   = logo ? 4  : 0;
+
+  const labelWidth   = compact ? 0 : Math.max(padding * 2, safeLabel.length * charW + padding * 2 + logoWidth + logoPad);
+  const valueWidth   = Math.max(padding * 2, safeValue.length * charW + padding * 2);
   const naturalWidth = labelWidth + valueWidth;
-  const width        = customWidth  || naturalWidth;
-  const height       = customHeight || 20;
+  const width        = customWidth  ? clamp(customWidth,  20, 2000) : naturalWidth;
+  const height       = customHeight ? clamp(customHeight, 12, 200)  : Math.max(20, Math.round(fs * 1.8));
   const scale        = customWidth  ? customWidth / naturalWidth : 1;
-  const scaledLabel  = Math.round(labelWidth * scale);
-  const scaledValue  = Math.round(valueWidth * scale);
+  const scaledLabel  = compact ? 0 : Math.round(labelWidth * scale);
+  const scaledValue  = width - scaledLabel;
   const textY        = Math.round(height * 0.65);
-  const radius       = style === "flat-square" ? 0 : 3;
+  const rx           = customRadius !== null ? clamp(customRadius, 0, height / 2) : (style === "flat-square" ? 0 : 3);
   const isSocial     = style === "social";
   const isPlastic    = style === "plastic";
+  const fontWeight   = bold ? "600" : "400";
 
   const resolvedLabelBg = isDark ? "#2d2d2d" : (isSocial ? "#555" : labelBg);
   const resolvedValueBg = valueBg;
 
-  const labelX = logo
+  const labelX = compact ? 0 : (logo
     ? (5 + logoWidth + logoPad + (labelWidth - 5 - logoWidth - logoPad) / 2) * scale
-    : scaledLabel / 2;
+    : scaledLabel / 2);
 
   const font = isSocial
     ? "Helvetica Neue,Helvetica,Arial,sans-serif"
@@ -155,24 +182,29 @@ function svg(label, value, labelBg, valueBg, style, logo, customWidth, customHei
       <stop offset="1"  stop-opacity=".5"/>
     </linearGradient>` : "";
 
-  const logoEl = logo
+  const logoEl = logo && !compact
     ? `<image href="${logo}" x="5" y="${Math.round((height - 14) / 2)}" width="14" height="14"/>`
     : "";
+
+  const labelEl = compact ? "" : `
+    <text x="${labelX}" y="${textY}" fill="#fff" fill-opacity="${labelOpacity}"
+          font-weight="${fontWeight}" font-size="${fs}">${safeLabel}</text>`;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
   <defs>${gradientDef}</defs>
   <mask id="m">
-    <rect width="${width}" height="${height}" rx="${radius}" fill="#fff"/>
+    <rect width="${width}" height="${height}" rx="${rx}" fill="#fff"/>
   </mask>
   <g mask="url(#m)">
-    <rect width="${scaledLabel}" height="${height}" fill="${resolvedLabelBg}"/>
+    ${compact ? "" : `<rect width="${scaledLabel}" height="${height}" fill="${resolvedLabelBg}"/>`}
     <rect x="${scaledLabel}" width="${scaledValue}" height="${height}" fill="${resolvedValueBg}"/>
     ${isPlastic ? `<rect width="${width}" height="${height}" fill="url(#g)"/>` : ""}
   </g>
   ${logoEl}
-  <g fill="#fff" text-anchor="middle" font-family="${font}" font-size="11">
-    <text x="${labelX}"                         y="${textY}">${safeLabel}</text>
-    <text x="${scaledLabel + scaledValue / 2}"  y="${textY}">${safeValue}</text>
+  <g text-anchor="middle" font-family="${font}" font-size="${fs}" font-weight="${fontWeight}">
+    ${labelEl}
+    <text x="${scaledLabel + scaledValue / 2}" y="${textY}" fill="#fff"
+          font-weight="${bold ? "600" : "400"}">${safeValue}</text>
   </g>
 </svg>`;
 }
@@ -187,21 +219,35 @@ export default async function handler(req, res) {
     const allowedUsers = (process.env.ALLOWED_USERS || "")
       .split(",").map(u => u.trim().toLowerCase()).filter(Boolean);
 
-    const pageId = (req.query.pageId || "").toString().trim().toLowerCase();
+    const pageId = (req.query.pageId || "").toString().trim().toLowerCase().slice(0, 50);
 
     if (!pageId || !allowedUsers.includes(pageId)) {
       return res.status(200).send(svg("views", "NA", "#555", "#999", "flat"));
     }
 
-    const label        = String(req.query.label      || "Profile Views");
-    const color        = String(req.query.color       || "#4c1");
-    const labelColor   = String(req.query.labelColor  || "#555");
-    const style        = String(req.query.style       || "flat");
-    const logo         = req.query.logo ? String(req.query.logo) : null;
-    const mode         = String(req.query.mode        || "total");
-    const customWidth  = req.query.width  ? parseInt(req.query.width,  10) || null : null;
-    const customHeight = req.query.height ? parseInt(req.query.height, 10) || null : null;
-    const isDark       = req.query.theme === "dark";
+    const label      = String(req.query.label      || "Profile Views");
+    const color      = String(req.query.color      || "#4c1");
+    const labelColor = String(req.query.labelColor || "#555");
+    const style      = String(req.query.style      || "flat");
+    const logo       = req.query.logo     ? String(req.query.logo)                           : null;
+    const mode       = String(req.query.mode       || "total");
+    const locale     = req.query.locale   ? String(req.query.locale)                         : null;
+    const precision  = req.query.precision !== undefined ? parseInt(req.query.precision, 10) : null;
+    const raw        = req.query.raw === "true";
+
+    const opts = {
+      customWidth:  req.query.width        ? parseInt(req.query.width,        10) || null : null,
+      customHeight: req.query.height       ? parseInt(req.query.height,       10) || null : null,
+      isDark:       req.query.theme        === "dark",
+      fontSize:     req.query.fontSize     ? parseInt(req.query.fontSize,     10) || 11   : 11,
+      bold:         req.query.bold         === "true",
+      padding:      req.query.padding      ? parseInt(req.query.padding,      10) || 16   : 16,
+      radius:       req.query.radius       !== undefined ? parseInt(req.query.radius, 10)      : null,
+      labelOpacity: req.query.labelOpacity ? parseFloat(req.query.labelOpacity)   || 1    : 1,
+      prefix:       req.query.prefix       ? String(req.query.prefix)                     : "",
+      suffix:       req.query.suffix       ? String(req.query.suffix)                     : "",
+      compact:      req.query.compact      === "true",
+    };
 
     const countKey  = `count:${pageId}`;
     const { day, week, month } = getDateKeys();
@@ -213,9 +259,9 @@ export default async function handler(req, res) {
     const ua = req.headers["user-agent"] || "";
 
     if (isBot(ua)) {
-      const raw = await kv.get(countKey);
-      const count = parseInt(raw ?? "0", 10) || 0;
-      return res.status(200).send(svg(label, formatNumber(count), labelColor, color, style, logo, customWidth, customHeight, isDark));
+      const raw_ = await kv.get(countKey);
+      const count = parseInt(raw_ ?? "0", 10) || 0;
+      return res.status(200).send(svg(label, formatNumber(count, locale, precision, raw), labelColor, color, style, logo, opts));
     }
 
     const safeIp     = getIp(req);
@@ -254,7 +300,7 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).send(
-      svg(label, formatNumber(displayCount), labelColor, color, style, logo, customWidth, customHeight, isDark)
+      svg(label, formatNumber(displayCount, locale, precision, raw), labelColor, color, style, logo, opts)
     );
 
   } catch (err) {
