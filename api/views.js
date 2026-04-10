@@ -31,7 +31,7 @@ export default async function handler(req, res) {
 
     const visitorKey = `visitor:${pageId}:${safeIp}`;
     const countKey = `count:${pageId}`;
-    const TTL = 300; // 5 min cooldown per IP
+    const TTL = 60; // 1 min cooldown per IP
 
     const seen = await kv.get(visitorKey);
 
