@@ -1,18 +1,40 @@
 import { kv } from '@vercel/kv';
 
 export default async function handler(req, res) {
-  try {
-    const { key, value } = req.query;
+  res.setHeader("Content-Type", "application/json");
 
-    if (!key || !value) {
-      return res.status(400).send("Missing key/value");
+  try {
+    const allowedUsers = (process.env.ALLOWED_USERS || "")
+      .split(",")
+      .map(u => u.trim().toLowerCase())
+      .filter(Boolean);
+
+    const pageId = (req.query.pageId || "")
+      .toString()
+      .trim()
+      .toLowerCase();
+
+    const value = parseInt(req.query.value || "0", 10);
+
+    if (!pageId || !allowedUsers.includes(pageId)) {
+      return res.status(403).json({ error: "Not allowed" });
     }
 
-    await kv.set(key.toLowerCase(), parseInt(value, 10));
+    if (isNaN(value)) {
+      return res.status(400).json({ error: "Invalid value" });
+    }
 
-    return res.send("OK");
+    await kv.set(pageId, value);
+
+    return res.status(200).json({
+      success: true,
+      pageId,
+      value
+    });
 
   } catch (err) {
-    return res.status(500).send(err.toString());
+    return res.status(500).json({
+      error: err.message
+    });
   }
 }
