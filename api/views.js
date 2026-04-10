@@ -4,7 +4,6 @@ export default async function handler(req, res) {
   res.setHeader("Content-Type", "image/svg+xml");
 
   try {
-    // allowed users
     const allowedUsers = (process.env.ALLOWED_USERS || "")
       .split(",")
       .map(u => u.trim().toLowerCase())
@@ -19,62 +18,54 @@ export default async function handler(req, res) {
       return res.status(200).send(svg("views", "NA", "#555", "#999", "flat"));
     }
 
-    // safe IP extraction
-    let ip =
-      req.headers["x-forwarded-for"] ||
-      req.headers["x-real-ip"] ||
-      "ip";
-
+    // Safe IP extraction
+    let ip = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || "unknown";
     if (Array.isArray(ip)) ip = ip[0];
     if (typeof ip === "string") ip = ip.split(",")[0].trim();
 
-    // safe user-agent
-    const ua = (req.headers["user-agent"] || "ua").slice(0, 50);
+    // Sanitize IP and UA for use in Redis key (IPv6 colons break keys)
+    const safeIp = ip.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+    const safeUa = (req.headers["user-agent"] || "ua")
+      .slice(0, 50)
+      .replace(/[^a-zA-Z0-9.\-_]/g, "_");
 
-    const visitorKey = `v:${pageId}:${ip}:${ua}`;
-
-    // cooldown (5 min)
+    const visitorKey = `v:${pageId}:${safeIp}:${safeUa}`;
     const TTL = 300;
 
     const seen = await kv.get(visitorKey);
 
-    // safe count parsing
     let count = await kv.get(`count:${pageId}`);
-    count = parseInt(count || "0", 10);
+    count = parseInt(count ?? "0", 10);
+    if (isNaN(count)) count = 0;
 
     if (!seen) {
       count++;
-      await kv.set(`count:${pageId}`, count);
-      await kv.set(visitorKey, 1, { ex: TTL });
+      await kv.set(`count:${pageId}`, String(count));
+      // Use separate expire call instead of options object (more compatible)
+      await kv.set(visitorKey, "1");
+      await kv.expire(visitorKey, TTL);
     }
 
-    // customization
     const label = String(req.query.label || "Profile Views");
-    const color = normalizeColor(req.query.color || "brightgreen");
-    const labelColor = normalizeColor(req.query.labelColor || "555");
+    const color = normalizeColor(String(req.query.color || "brightgreen"));
+    const labelColor = normalizeColor(String(req.query.labelColor || "555"));
     const style = String(req.query.style || "flat");
 
     const formattedCount = formatNumber(count);
 
-    return res
-      .status(200)
-      .send(svg(label, formattedCount, labelColor, color, style));
+    return res.status(200).send(svg(label, formattedCount, labelColor, color, style));
 
   } catch (err) {
-    return res
-      .status(200)
-      .send(svg("error", "0", "#555", "#e05d44", "flat"));
+    return res.status(200).send(svg("error", "0", "#555", "#e05d44", "flat"));
   }
 }
 
-// number formatting
 function formatNumber(num) {
-  if (num < 1000) return num;
+  if (num < 1000) return String(num);  // Fix: was returning number type
   if (num < 1_000_000) return (num / 1000).toFixed(1) + "k";
   return (num / 1_000_000).toFixed(1) + "M";
 }
 
-// color normalization
 function normalizeColor(color) {
   const colors = {
     brightgreen: "#4c1",
@@ -85,15 +76,13 @@ function normalizeColor(color) {
     red: "#e05d44",
     blue: "#007ec6",
     grey: "#555",
-    gray: "#555"
+    gray: "#555",
   };
-
   if (colors[color]) return colors[color];
-  if (typeof color === "string" && color.startsWith("#")) return color;
+  if (color.startsWith("#")) return color;
   return `#${color}`;
 }
 
-// SVG generator
 function svg(label, value, labelBg, valueBg, style) {
   const safeLabel = String(label || "views");
   const safeValue = String(value || "0");
@@ -101,34 +90,22 @@ function svg(label, value, labelBg, valueBg, style) {
   const labelWidth = Math.max(60, safeLabel.length * 6.5 + 10);
   const valueWidth = Math.max(40, safeValue.length * 7 + 10);
   const width = labelWidth + valueWidth;
-
   const radius = style === "flat-square" ? 0 : 3;
 
-  return `
-<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="20">
-  <linearGradient id="g" x2="0" y2="100%">
-    <stop offset="0" stop-color="#fff" stop-opacity=".7"/>
-    <stop offset=".1" stop-color="#aaa" stop-opacity=".1"/>
-    <stop offset=".9" stop-opacity=".3"/>
-    <stop offset="1" stop-opacity=".5"/>
-  </linearGradient>
-
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="20">
   <mask id="m">
     <rect width="${width}" height="20" rx="${radius}" fill="#fff"/>
   </mask>
-
   <g mask="url(#m)">
     <rect width="${labelWidth}" height="20" fill="${labelBg}"/>
     <rect x="${labelWidth}" width="${valueWidth}" height="20" fill="${valueBg}"/>
     ${style === "plastic" ? `<rect width="${width}" height="20" fill="url(#g)"/>` : ""}
   </g>
-
   <g fill="#fff" text-anchor="middle"
      font-family="Verdana, Geneva, DejaVu Sans, sans-serif"
      font-size="11">
     <text x="${labelWidth / 2}" y="14">${safeLabel}</text>
     <text x="${labelWidth + valueWidth / 2}" y="14">${safeValue}</text>
   </g>
-</svg>
-`;
+</svg>`;
 }
