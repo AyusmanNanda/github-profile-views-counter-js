@@ -1,7 +1,3 @@
-import Redis from "ioredis";
-
-const redis = new Redis(process.env.REDIS_URL);
-
 export default async function handler(req, res) {
   res.setHeader("Content-Type", "image/svg+xml");
 
@@ -17,21 +13,24 @@ export default async function handler(req, res) {
       .toLowerCase();
 
     if (!pageId || !allowedUsers.includes(pageId)) {
-      return res.status(404).send(svg("Not found"));
+      return res.status(200).send(svg("Not allowed"));
     }
 
-    let count = await redis.get(pageId);
+    const url = `${process.env.UPSTASH_REDIS_REST_URL}/incr/${pageId}`;
 
-    if (!count) count = 0;
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`
+      }
+    });
 
-    count = parseInt(count) + 1;
-
-    await redis.set(pageId, count);
+    const data = await response.json();
+    const count = data.result;
 
     return res.status(200).send(svg(`Profile Views: ${count}`));
 
   } catch (err) {
-    return res.status(500).send(svg(`ERR: ${err.message}`));
+    return res.status(200).send(svg(`ERR: ${err.message}`));
   }
 }
 
