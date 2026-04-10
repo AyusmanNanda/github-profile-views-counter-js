@@ -2,6 +2,6 @@
   "name": "github-profile-views-counter-js",
   "type": "module",
   "dependencies": {
-    "@vercel/kv": "^latest"
+    "@vercel/kv": "latest"
   }
 }
