@@ -1,3 +1,5 @@
+import { kv } from '@vercel/kv';
+
 export default async function handler(req, res) {
   res.setHeader("Content-Type", "image/svg+xml");
 
@@ -16,16 +18,12 @@ export default async function handler(req, res) {
       return res.status(200).send(svg("Not allowed"));
     }
 
-    const url = `${process.env.UPSTASH_REDIS_REST_URL}/incr/${pageId}`;
+    let count = await kv.get(pageId);
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`
-      }
-    });
+    if (count === null) count = 0;
 
-    const data = await response.json();
-    const count = data.result;
+    count++;
+    await kv.set(pageId, count);
 
     return res.status(200).send(svg(`Profile Views: ${count}`));
 
