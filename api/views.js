@@ -18,52 +18,23 @@ export default async function handler(req, res) {
       return res.status(200).send(svg("views", "NA", "#555", "#999", "flat"));
     }
 
-    // Safe IP extraction
-    let ip = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || "unknown";
-    if (Array.isArray(ip)) ip = ip[0];
-    if (typeof ip === "string") ip = ip.split(",")[0].trim();
-
-    // Sanitize IP and UA for use in Redis key (IPv6 colons break keys)
-    const safeIp = ip.replace(/[^a-zA-Z0-9.\-_]/g, "_");
-    const safeUa = (req.headers["user-agent"] || "ua")
-      .slice(0, 50)
-      .replace(/[^a-zA-Z0-9.\-_]/g, "_");
-
-    const visitorKey = `v:${pageId}:${safeIp}:${safeUa}`;
-    const TTL = 300;
-
-    const seen = await kv.get(visitorKey);
-
     let count = await kv.get(`count:${pageId}`);
     count = parseInt(count ?? "0", 10);
     if (isNaN(count)) count = 0;
 
-    if (!seen) {
-      count++;
-      await kv.set(`count:${pageId}`, String(count));
-      // Use separate expire call instead of options object (more compatible)
-      await kv.set(visitorKey, "1");
-      await kv.expire(visitorKey, TTL);
-    }
+    count++;
+    await kv.set(`count:${pageId}`, String(count));
 
     const label = String(req.query.label || "Profile Views");
     const color = normalizeColor(String(req.query.color || "brightgreen"));
     const labelColor = normalizeColor(String(req.query.labelColor || "555"));
     const style = String(req.query.style || "flat");
 
-    const formattedCount = formatNumber(count);
-
-    return res.status(200).send(svg(label, formattedCount, labelColor, color, style));
+    return res.status(200).send(svg(label, String(count), labelColor, color, style));
 
   } catch (err) {
     return res.status(200).send(svg("error", "0", "#555", "#e05d44", "flat"));
   }
-}
-
-function formatNumber(num) {
-  if (num < 1000) return String(num);  // Fix: was returning number type
-  if (num < 1_000_000) return (num / 1000).toFixed(1) + "k";
-  return (num / 1_000_000).toFixed(1) + "M";
 }
 
 function normalizeColor(color) {
@@ -99,7 +70,6 @@ function svg(label, value, labelBg, valueBg, style) {
   <g mask="url(#m)">
     <rect width="${labelWidth}" height="20" fill="${labelBg}"/>
     <rect x="${labelWidth}" width="${valueWidth}" height="20" fill="${valueBg}"/>
-    ${style === "plastic" ? `<rect width="${width}" height="20" fill="url(#g)"/>` : ""}
   </g>
   <g fill="#fff" text-anchor="middle"
      font-family="Verdana, Geneva, DejaVu Sans, sans-serif"
