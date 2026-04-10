@@ -1,4 +1,6 @@
-import { kv } from '@vercel/kv';
+import Redis from "ioredis";
+
+const redis = new Redis(process.env.REDIS_URL);
 
 export default async function handler(req, res) {
   res.setHeader("Content-Type", "image/svg+xml");
@@ -14,34 +16,31 @@ export default async function handler(req, res) {
       .trim()
       .toLowerCase();
 
-    // 🔐 Check user
     if (!pageId || !allowedUsers.includes(pageId)) {
-      return res.status(200).send(svg(`NOT_ALLOWED: ${pageId}`));
+      return res.status(404).send(svg("Not found"));
     }
 
-    // 🔍 KV test
-    let count = await kv.get(pageId);
+    let count = await redis.get(pageId);
 
-    if (count === null || count === undefined) {
-      count = 0;
-    }
+    if (!count) count = 0;
 
-    count++;
-    await kv.set(pageId, count);
+    count = parseInt(count) + 1;
 
-    return res.status(200).send(svg(`OK: ${count}`));
+    await redis.set(pageId, count);
+
+    return res.status(200).send(svg(`Profile Views: ${count}`));
 
   } catch (err) {
-    // 🔥 SHOW REAL ERROR
-    return res.status(200).send(svg(`ERR: ${err.message}`));
+    return res.status(500).send(svg(`ERR: ${err.message}`));
   }
 }
 
 function svg(text) {
   return `
-<svg xmlns="http://www.w3.org/2000/svg" width="300" height="20">
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="20">
   <rect width="100%" height="100%" fill="#2C3E50"/>
-  <text x="10" y="14" fill="white" font-size="12">
+  <text x="50%" y="50%" fill="white" font-size="12"
+        text-anchor="middle" dominant-baseline="middle">
     ${text}
   </text>
 </svg>
